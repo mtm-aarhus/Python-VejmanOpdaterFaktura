@@ -265,9 +265,6 @@ def FetchInvoice(data_frame: pd.DataFrame, token, pricebook_map, equipment_type,
             json_object = response.json().get('data')
             caseworker_email = json_object['authEmail']
 
-        
-
-            orchestrator_connection.log_info(json_object.get('invoice', {}))
             # Check if there's an invoice in the JSON object
             invoice_data = json_object.get('invoice', {})
             
