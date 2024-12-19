@@ -62,17 +62,15 @@ def process(orchestrator_connection: OrchestratorConnection, queue_element: Queu
         start_date = row.EarliestStartDate
         from_end_date = row.EarliestSlutDate
         
+        equipment_types = [eq_type]  # Use only the current equipment_type
+        
         # Check if equipment_type is 5
         if eq_type == 1:
             equipment_types = [1, 9]  # List of equipment types to iterate over
-        else:
-            equipment_types = [eq_type]  # Use only the current equipment_type
-            
+
         if eq_type == 2:
             equipment_types = [2, 7]  # List of equipment types to iterate over
-        else:
-            equipment_types = [eq_type]  # Use only the current equipment_type
-
+            
         # Iterate through the relevant equipment types
         for equipment_type in equipment_types:
             # Fetch permissions data
