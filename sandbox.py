@@ -403,33 +403,41 @@ faktura_db = cursor.fetchall()
 
 for row in rows:
     fakturalinjer = row.Fakturalinjer
-    equipment_type = row.MaterielIDVejman
+    eq_type = row.MaterielIDVejman
     start_date = row.EarliestStartDate
     from_end_date = row.EarliestSlutDate
+    
+      # Check if equipment_type is 5
+    if eq_type == 1:
+        equipment_types = [1, 9]  # List of equipment types to iterate over
+    else:
+        equipment_types = [eq_type]  # Use only the current equipment_type
 
-    # Fetch permissions data
-    data_frame = FetchVejmanPermissions(token, equipment_type, start_date, from_end_date)
+    # Iterate through the relevant equipment types
+    for equipment_type in equipment_types:
+        # Fetch permissions data
+        data_frame = FetchVejmanPermissions(token, equipment_type, start_date, from_end_date)
 
-    if data_frame.empty:
-        print(f'Ingen rækker for {equipment_type} fra startdato {start_date} og fra slutdato {from_end_date}')
-        continue
-    # Clean authority_reference_number column
-    data_frame['cleaned_authority_reference_number'] = data_frame['authority_reference_number'].apply(
-        lambda x: re.sub(r'[^\x20-\x7E]', '', str(x).strip().lower()) if pd.notnull(x) else ''
-    )
+        if data_frame.empty:
+            print(f'Ingen rækker for {equipment_type} fra startdato {start_date} og fra slutdato {from_end_date}')
+            continue
+        # Clean authority_reference_number column
+        data_frame['cleaned_authority_reference_number'] = data_frame['authority_reference_number'].apply(
+            lambda x: re.sub(r'[^\x20-\x7E]', '', str(x).strip().lower()) if pd.notnull(x) else ''
+        )
 
-    # Filter rows based on substring checks for 'faktura sendt' and 'faktureres ikke', and exact match for 'fak'
-    filtered_rows = data_frame[
-        ~(
-            data_frame['cleaned_authority_reference_number'].str.contains('faktura sendt') | 
-            data_frame['cleaned_authority_reference_number'].str.contains('faktureres ikke') | 
-            data_frame['cleaned_authority_reference_number'].str.contains('annulleret') | 
-            (data_frame['cleaned_authority_reference_number'] == 'fak')
-        ) & 
-        (data_frame['initials'] != 'JADT')
-    ]
+        # Filter rows based on substring checks for 'faktura sendt' and 'faktureres ikke', and exact match for 'fak'
+        filtered_rows = data_frame[
+            ~(
+                data_frame['cleaned_authority_reference_number'].str.contains('faktura sendt') | 
+                data_frame['cleaned_authority_reference_number'].str.contains('faktureres ikke') | 
+                data_frame['cleaned_authority_reference_number'].str.contains('annulleret') | 
+                (data_frame['cleaned_authority_reference_number'] == 'fak')
+            ) & 
+            (data_frame['initials'] != 'JADT')
+        ]
 
 
-    print(filtered_rows)
-    # Fetch invoices for filtered rows
-    FetchInvoice(filtered_rows, token, pricebook_map, equipment_type, fakturalinjer, conn, faktura_db, developer_email)
+        print(filtered_rows)
+        # Fetch invoices for filtered rows
+        FetchInvoice(filtered_rows, token, pricebook_map, equipment_type, fakturalinjer, conn, faktura_db, developer_email)
