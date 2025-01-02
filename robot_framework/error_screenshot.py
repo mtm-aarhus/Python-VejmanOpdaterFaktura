@@ -2,11 +2,11 @@
 
 import smtplib
 from email.message import EmailMessage
-import base64
+#import base64
 import traceback
-from io import BytesIO
+#from io import BytesIO
 
-from PIL import ImageGrab
+#from PIL import ImageGrab
 
 from robot_framework import config
 
@@ -24,13 +24,13 @@ def send_error_screenshot(to_address: str | list[str], exception: Exception, pro
     msg = EmailMessage()
     msg['to'] = to_address
     msg['from'] = config.SCREENSHOT_SENDER
-    msg['subject'] = f"Error screenshot: {process_name}"
+    msg['subject'] = f"Error: {process_name}"
 
     # Take screenshot and convert to base64
-    screenshot = ImageGrab.grab()
-    buffer = BytesIO()
-    screenshot.save(buffer, format='PNG')
-    screenshot_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+    # screenshot = ImageGrab.grab()
+    # buffer = BytesIO()
+    # screenshot.save(buffer, format='PNG')
+    # screenshot_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
 
     # Create an HTML message with the exception and screenshot
     html_message = f"""
@@ -39,10 +39,11 @@ def send_error_screenshot(to_address: str | list[str], exception: Exception, pro
             <p>Error type: {type(exception).__name__}</p>
             <p>Error message: {exception}</p>
             <p>{traceback.format_exc()}</p>
-            <img src="data:image/png;base64,{screenshot_base64}" alt="Screenshot">
+
         </body>
     </html>
     """
+    #            <img src="data:image/png;base64,{screenshot_base64}" alt="Screenshot">
 
     msg.set_content("Please enable HTML to view this message.")
     msg.add_alternative(html_message, subtype='html')
