@@ -136,48 +136,53 @@ def FetchVejmanToken(VejmanUsername, VejmanPassword, orchestrator_connection: Or
     chrome_options.add_argument("--disable-search-engine-choice-screen")
     driver = webdriver.Chrome(options=chrome_options)
 
+    try:
+        # Navigate to Vejman.com
+        driver.get("https://vejman.vd.dk/permissions/getcases?pmCaseStates=100%2C2&pmCaseFields=state&pmCaseWorker=all&pmCaseTypes=%27gt%27%2C%27rovm%27&pmCaseVariant=all&pmCaseTags=ignorerTags&pmCaseTagShow=&pmCaseShowAttachments=false&pmAllStates=&dontincludemap=1&cse=&policeDistrictShow=&_=1695643769061")
 
-    # Navigate to Vejman.com
-    driver.get("https://vejman.vd.dk/permissions/getcases?pmCaseStates=100%2C2&pmCaseFields=state&pmCaseWorker=all&pmCaseTypes=%27gt%27%2C%27rovm%27&pmCaseVariant=all&pmCaseTags=ignorerTags&pmCaseTagShow=&pmCaseShowAttachments=false&pmAllStates=&dontincludemap=1&cse=&policeDistrictShow=&_=1695643769061")
+        # Define fields for login
+        username_field = driver.find_element(By.ID, "username")
+        password_field = driver.find_element(By.ID, "password")
+        login_button = driver.find_element(By.ID, "login-button")
 
-    # Define fields for login
-    username_field = driver.find_element(By.ID, "username")
-    password_field = driver.find_element(By.ID, "password")
-    login_button = driver.find_element(By.ID, "login-button")
+        # Type username and password
+        username_field.send_keys(VejmanUsername)
+        password_field.send_keys(VejmanPassword)
 
-    # Type username and password
-    username_field.send_keys(VejmanUsername)
-    password_field.send_keys(VejmanPassword)
+        # Click the login button
+        login_button.click()
+        wait = WebDriverWait(driver, 60)
 
-    # Click the login button
-    login_button.click()
-    wait = WebDriverWait(driver, 60)
+        wait.until(lambda d: "&token=" in d.current_url)
 
-    wait.until(lambda d: "&token=" in d.current_url)
+        if "&token=" in driver.current_url:
+            token = driver.current_url.split("&token=")[1]
+        else:
+            raise PermissionError("Error fetching token, check if password has changed or Vejman is down.")
 
-    if "&token=" in driver.current_url:
-        token = driver.current_url.split("&token=")[1]
-    else:
-        raise PermissionError("Error fetching token, check if password has changed or Vejman is down.")
+        # if time.localtime().tm_mday == 1:
+        #     driver.get("https://vejman.vd.dk/useradm/loginapi/dialog/change")
+        #     time.sleep(5)
+            
+        #     # Generate a new password
+        #     new_password = generate_password()
+        #     orchestrator_connection.log_info("New password: " + new_password)
+            
+        #     driver.find_element(By.ID, "previous-password").send_keys(VejmanPassword)
+        #     driver.find_element(By.ID, "new-password").send_keys(new_password)
+        #     driver.find_element(By.ID, "repeat-password").send_keys(new_password)
+        #     time.sleep(2)
+        #     driver.find_element(By.ID, "change-password-button").click()
+        #     time.sleep(4)
+        #     # Update the config file with the new password
+        #     orchestrator_connection.update_credential("VejmanCredentials",VejmanUsername,new_password)
 
-    # if time.localtime().tm_mday == 1:
-    #     driver.get("https://vejman.vd.dk/useradm/loginapi/dialog/change")
-    #     time.sleep(5)
-        
-    #     # Generate a new password
-    #     new_password = generate_password()
-    #     orchestrator_connection.log_info("New password: " + new_password)
-        
-    #     driver.find_element(By.ID, "previous-password").send_keys(VejmanPassword)
-    #     driver.find_element(By.ID, "new-password").send_keys(new_password)
-    #     driver.find_element(By.ID, "repeat-password").send_keys(new_password)
-    #     time.sleep(2)
-    #     driver.find_element(By.ID, "change-password-button").click()
-    #     time.sleep(4)
-    #     # Update the config file with the new password
-    #     orchestrator_connection.update_credential("VejmanCredentials",VejmanUsername,new_password)
+        driver.quit()
+    except Exception as e:
+        orchestrator_connection.log_info("Exception, quitting driver and raising exception afterwards: "+str(e))
+        driver.quit()
+        raise e
 
-    driver.quit()
     return token
 
 def FetchVejmanPermissions(token, equipment_type, fra_startdato, fra_slutdato, orchestrator_connection: OrchestratorConnection):
