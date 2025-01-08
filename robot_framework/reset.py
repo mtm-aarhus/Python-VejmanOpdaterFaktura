@@ -1,5 +1,4 @@
 """This module handles resetting the state of the computer so the robot can work with a clean slate."""
-import subprocess
 from OpenOrchestrator.orchestrator_connection.connection import OrchestratorConnection
 
 
@@ -26,9 +25,6 @@ def kill_all(orchestrator_connection: OrchestratorConnection) -> None:
     """Forcefully close all applications used by the robot."""
     orchestrator_connection.log_trace("Killing all applications.")
     
-    subprocess.call("taskkill /F /IM chrome.exe /T", stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=True)
-    subprocess.call("taskkill /F /IM chromedriver.exe /T", stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=True)
-
 def open_all(orchestrator_connection: OrchestratorConnection) -> None:
     """Open all programs used by the robot."""
     orchestrator_connection.log_trace("Opening all applications.")

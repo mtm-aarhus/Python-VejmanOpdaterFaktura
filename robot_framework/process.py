@@ -11,26 +11,18 @@ import time
 import string
 import pyodbc
 
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-
 import pandas as pd
 import locale
 import smtplib
 from email.message import EmailMessage
 from datetime import datetime
 
-
-
 # pylint: disable-next=unused-argument
 def process(orchestrator_connection: OrchestratorConnection, queue_element: QueueElement | None = None) -> None:
     """Do the primary process of the robot."""
     
     orchestrator_connection.log_trace("Running process.")
-    VejmanCredentials = orchestrator_connection.get_credential("VejmanCredentials")
-    token = FetchVejmanToken(VejmanCredentials.username, VejmanCredentials.password, orchestrator_connection)
+    token = orchestrator_connection.get_credential("VejmanToken").password
     pricebook_map = FetchPricebookData(token)
     developer_email = orchestrator_connection.get_constant("JADT").value
 
@@ -129,62 +121,6 @@ def generate_password(length=15):
     
     return ''.join(password)
 
-def FetchVejmanToken(VejmanUsername, VejmanPassword, orchestrator_connection: OrchestratorConnection):
-    # Set up Chrome options
-    
-    chrome_options = Options()
-    chrome_options.add_argument("--disable-search-engine-choice-screen")
-    driver = webdriver.Chrome(options=chrome_options)
-
-    try:
-        # Navigate to Vejman.com
-        driver.get("https://vejman.vd.dk/permissions/getcases?pmCaseStates=100%2C2&pmCaseFields=state&pmCaseWorker=all&pmCaseTypes=%27gt%27%2C%27rovm%27&pmCaseVariant=all&pmCaseTags=ignorerTags&pmCaseTagShow=&pmCaseShowAttachments=false&pmAllStates=&dontincludemap=1&cse=&policeDistrictShow=&_=1695643769061")
-
-        # Define fields for login
-        username_field = driver.find_element(By.ID, "username")
-        password_field = driver.find_element(By.ID, "password")
-        login_button = driver.find_element(By.ID, "login-button")
-
-        # Type username and password
-        username_field.send_keys(VejmanUsername)
-        password_field.send_keys(VejmanPassword)
-
-        # Click the login button
-        login_button.click()
-        wait = WebDriverWait(driver, 60)
-
-        wait.until(lambda d: "&token=" in d.current_url)
-
-        if "&token=" in driver.current_url:
-            token = driver.current_url.split("&token=")[1]
-        else:
-            raise PermissionError("Error fetching token, check if password has changed or Vejman is down.")
-
-        # if time.localtime().tm_mday == 1:
-        #     driver.get("https://vejman.vd.dk/useradm/loginapi/dialog/change")
-        #     time.sleep(5)
-            
-        #     # Generate a new password
-        #     new_password = generate_password()
-        #     orchestrator_connection.log_info("New password: " + new_password)
-            
-        #     driver.find_element(By.ID, "previous-password").send_keys(VejmanPassword)
-        #     driver.find_element(By.ID, "new-password").send_keys(new_password)
-        #     driver.find_element(By.ID, "repeat-password").send_keys(new_password)
-        #     time.sleep(2)
-        #     driver.find_element(By.ID, "change-password-button").click()
-        #     time.sleep(4)
-        #     # Update the config file with the new password
-        #     orchestrator_connection.update_credential("VejmanCredentials",VejmanUsername,new_password)
-
-        driver.quit()
-    except Exception as e:
-        orchestrator_connection.log_info("Exception, quitting driver and raising exception afterwards: "+str(e))
-        driver.quit()
-        raise e
-
-    return token
-
 def FetchVejmanPermissions(token, equipment_type, fra_startdato, fra_slutdato, orchestrator_connection: OrchestratorConnection):
 
     combined_cases = []
@@ -219,8 +155,6 @@ def FetchPricebookData(token):
     pricebook_data = response.json().get('data', [])
     pricebook_map = {item['text']: item for item in pricebook_data}
     return pricebook_map
-
-
 
 
 def append_to_mail_body(mail_body, append_text):
