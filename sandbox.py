@@ -21,87 +21,7 @@ from robot_framework import config
 from OpenOrchestrator.orchestrator_connection.connection import OrchestratorConnection
 import pyodbc
 
-def generate_password(length=15):
-    digits = string.digits
-    lower_case = string.ascii_lowercase
-    upper_case = string.ascii_uppercase
-    special = "-!"
-
-    password = []
-    
-    # Pick 2 digits
-    password.extend(random.choices(digits, k=2))
-    
-    # Pick 4 lower case letters
-    password.extend(random.choices(lower_case, k=4))
-    
-    # Pick 1 special character
-    password.extend(random.choices(special, k=1))
-    
-    # Pick 2 upper case letters
-    password.extend(random.choices(upper_case, k=2))
-    
-    # Pick additional characters to make the length 15
-    all_chars = digits + lower_case + upper_case + special
-    password.extend(random.choices(all_chars, k=length - len(password)))
-    
-    # Shuffle the password to ensure randomness
-    random.shuffle(password)
-    
-    return ''.join(password)
-
-def FetchVejmanToken(VejmanUsername, VejmanPassword, orchestrator_connection: OrchestratorConnection):
-    # Set up Chrome options
-    
-    chrome_options = Options()
-    chrome_options.add_argument("--disable-search-engine-choice-screen")
-    driver = webdriver.Chrome(options=chrome_options)
-
-
-    # Navigate to Vejman.com
-    driver.get("https://vejman.vd.dk/permissions/getcases?pmCaseStates=100%2C2&pmCaseFields=state&pmCaseWorker=all&pmCaseTypes=%27gt%27%2C%27rovm%27&pmCaseVariant=all&pmCaseTags=ignorerTags&pmCaseTagShow=&pmCaseShowAttachments=false&pmAllStates=&dontincludemap=1&cse=&policeDistrictShow=&_=1695643769061")
-
-    # Define fields for login
-    username_field = driver.find_element(By.ID, "username")
-    password_field = driver.find_element(By.ID, "password")
-    login_button = driver.find_element(By.ID, "login-button")
-
-    # Type username and password
-    username_field.send_keys(VejmanUsername)
-    password_field.send_keys(VejmanPassword)
-
-    # Click the login button
-    login_button.click()
-    wait = WebDriverWait(driver, 60)
-
-    wait.until(lambda d: "&token=" in d.current_url)
-
-    if "&token=" in driver.current_url:
-        token = driver.current_url.split("&token=")[1]
-    else:
-        raise PermissionError("Error fetching token, check if password has changed or Vejman is down.")
-
-    # if time.localtime().tm_mday == 1:
-    #     driver.get("https://vejman.vd.dk/useradm/loginapi/dialog/change")
-    #     time.sleep(5)
-        
-    #     # Generate a new password
-    #     new_password = generate_password()
-    #     print("New password: " + new_password)
-        
-    #     driver.find_element(By.ID, "previous-password").send_keys(VejmanPassword)
-    #     driver.find_element(By.ID, "new-password").send_keys(new_password)
-    #     driver.find_element(By.ID, "repeat-password").send_keys(new_password)
-    #     time.sleep(2)
-    #     driver.find_element(By.ID, "change-password-button").click()
-    #     time.sleep(4)
-    #     # Update the config file with the new password
-    #     orchestrator_connection.update_credential("VejmanCredentials",VejmanUsername,new_password)
-
-    driver.quit()
-    return token
-
-def FetchVejmanPermissions(token, equipment_type, fra_startdato, fra_slutdato):
+def FetchVejmanPermissions(token, equipment_type, fra_startdato, fra_slutdato, orchestrator_connection: OrchestratorConnection):
 
     combined_cases = []
 
@@ -137,8 +57,6 @@ def FetchPricebookData(token):
     return pricebook_map
 
 
-
-
 def append_to_mail_body(mail_body, append_text):
     """
     Appends text to mail_body with a <br> if mail_body already has content.
@@ -171,7 +89,7 @@ def SendEmail(to_address: str | list[str], subject: str, body: str, bcc: str):
         smtp.send_message(msg)
 
 
-def FetchInvoice(data_frame: pd.DataFrame, token, pricebook_map, equipment_type, fakturalinjer, conn, faktura_db, developer_email):
+def FetchInvoice(data_frame: pd.DataFrame, token, pricebook_map, equipment_type, fakturalinjer, conn, faktura_db, developer_email, orchestrator_connection: OrchestratorConnection):
     locale.setlocale(locale.LC_NUMERIC, 'da_DK')
     
     with requests.Session() as client:
@@ -186,10 +104,11 @@ def FetchInvoice(data_frame: pd.DataFrame, token, pricebook_map, equipment_type,
             end_date = datetime.strptime(row.get('end_date', ''), "%d-%m-%Y")
             completion_date = datetime.strptime(row.get('completion_date', ''), "%d-%m-%Y")
             auto_completed = row.get('auto_completed')
-            cvr_number = row.get('cvr_number')
+            #cvr_number = row.get('cvr_number')
             applicant = row.get('applicant')
             tilladelse_nr = case_number
             address = row['street_name']
+
             
             # Fetch detailed case data
             response = client.get(f"https://vejman.vd.dk/permissions/getcase?caseid={case_id}&token={token}", timeout=500)
@@ -197,29 +116,43 @@ def FetchInvoice(data_frame: pd.DataFrame, token, pricebook_map, equipment_type,
             json_object = response.json().get('data')
             caseworker_email = json_object['authEmail']
 
-        
-
-            print(json_object.get('invoice', {}))
             # Check if there's an invoice in the JSON object
             invoice_data = json_object.get('invoice', {})
             
+            
+
+            
             if invoice_data:         
-                # Update the cvr_number if not found in the main DataFrame
-                if not cvr_number:
-                    contacts = json_object.get('contacts', [])
-                    for contact in contacts:
-                        cvr_number = contact.get('cvr_number')
-                        if cvr_number:
-                            break
+                # Get invoice role, select 1 (ansøger) if no role selected
+                invoice_role_id = invoice_data.get('role', {}).get('id', 1)
+                att = "Intet navn angivet"
+                # Get name for ATT and update the cvr_number if not found in the main DataFrame
+                contacts = json_object.get('contacts', [])
+                for contact in contacts:
+                    # Check if this contact has a role matching the invoice role id
+                    roles = contact.get("roles", [])
+                    if any(role.get("role", {}).get("id") == invoice_role_id for role in roles):
+                        # Combine name components
+                        name_parts = [
+                            contact.get("given_name", ""),
+                            contact.get("middle_name", ""),
+                            contact.get("surname", ""),
+                        ]
+                        combined_name = " ".join(part for part in name_parts if part)
+                        if combined_name:
+                            att = f"ATT: {combined_name}"  # Set att with the combined name
+
+                        cvr_number = contact.get("cvr_number")
+                        break  # Exit loop once the matching contact is processed
 
                 if not cvr_number:
                     print("Intet CVR nummer")
-                    mail_body = append_to_mail_body(mail_body, f'Der er intet CVR nummer angivet på tilladelse <a href="https://vejman.vd.dk/permissions/update.jsp?caseid={case_id}">{tilladelse_nr}</a>.')
+                    mail_body = append_to_mail_body(mail_body, f'Der er intet CVR nummer angivet for faktura modtager på tilladelse <a href="https://vejman.vd.dk/permissions/update.jsp?caseid={case_id}">{tilladelse_nr}</a>.')
                     cvr_number = '00000000'
                 else:
                     if re.fullmatch(r'\d{8}', cvr_number) is None:
                         print("Forkert angivet CVR nummer")
-                        mail_body = append_to_mail_body(mail_body, f'CVR nummer er angivet som {cvr_number} på tilladelse <a href="https://vejman.vd.dk/permissions/update.jsp?caseid={case_id}">{tilladelse_nr}</a>, men det burde være udelukkende 8 cifre. Check venligst om det er angivet korrekt og om der er skjulte tegn eller mellemrum.')
+                        mail_body = append_to_mail_body(mail_body, f'CVR nummer er angivet som {cvr_number} for faktura modtager på tilladelse <a href="https://vejman.vd.dk/permissions/update.jsp?caseid={case_id}">{tilladelse_nr}</a>, men det burde være udelukkende 8 cifre. Check venligst om det er angivet korrekt og om der er skjulte tegn eller mellemrum.')
                         cvr_number = '00000000'
                 invoice_details = invoice_data.get('details', [])
                 # Iterate through each invoice detail and extract relevant information
@@ -267,7 +200,7 @@ def FetchInvoice(data_frame: pd.DataFrame, token, pricebook_map, equipment_type,
                         print("No matching row")
                         # Check if autocompleted, if so then end_date, if not check if completion_date is lesser than end_date, else use end_date
                         chosen_end_date = end_date if auto_completed == "AF" else min(completion_date, end_date) if completion_date and end_date else end_date
-
+                    
                     
                     if start_date and chosen_end_date:
                         # Convert both to date objects, ignoring time part
@@ -331,13 +264,14 @@ def FetchInvoice(data_frame: pd.DataFrame, token, pricebook_map, equipment_type,
                             Enhedspris = ?, 
                             Meter = ?, 
                             Startdato = ?, 
-                            Slutdato = ?
+                            Slutdato = ?,
+                            ATT = ?
                     WHEN NOT MATCHED THEN
                         INSERT (
                             VejmanID, Ansøger, FørsteSted, Tilladelsesnr, CvrNr, TilladelsesType, 
-                            Enhedspris, Meter, Startdato, Slutdato, VejmanFakturaID
+                            Enhedspris, Meter, Startdato, Slutdato, VejmanFakturaID, ATT
                         )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                     """
 
                     # Execute the query
@@ -350,11 +284,11 @@ def FetchInvoice(data_frame: pd.DataFrame, token, pricebook_map, equipment_type,
                                 
                                 # For update (if exists)
                                 applicant, address, tilladelse_nr, cvr_number, Fakturalinje, 
-                                unit_price, length, short_start_date, short_end_date,
+                                unit_price, length, short_start_date, short_end_date, att,
                                 
                                 # For insert (if not exists)
                                 case_id, applicant, address, tilladelse_nr, cvr_number, Fakturalinje, 
-                                unit_price, length, short_start_date, short_end_date, VejmanFakturaID
+                                unit_price, length, short_start_date, short_end_date, VejmanFakturaID, att
                             )
                         )
                         conn.commit()
@@ -372,10 +306,10 @@ def FetchInvoice(data_frame: pd.DataFrame, token, pricebook_map, equipment_type,
             else:
                 print(f"No invoices found for case ID: {case_id}")
         
-        
 orchestrator_connection = OrchestratorConnection("VejmanOpusFakturering", os.getenv('OpenOrchestratorSQL'),os.getenv('OpenOrchestratorKey'), None)
-VejmanCredentials = orchestrator_connection.get_credential("VejmanCredentials")
-token = FetchVejmanToken(VejmanCredentials.username, VejmanCredentials.password, orchestrator_connection)
+
+
+token = orchestrator_connection.get_credential("VejmanToken").password
 pricebook_map = FetchPricebookData(token)
 developer_email = orchestrator_connection.get_constant("JADT").value
 
@@ -415,11 +349,11 @@ for row in rows:
 
     if eq_type == 2:
         equipment_types = [2, 7]  # List of equipment types to iterate over
-
+        
     # Iterate through the relevant equipment types
     for equipment_type in equipment_types:
         # Fetch permissions data
-        data_frame = FetchVejmanPermissions(token, equipment_type, start_date, from_end_date)
+        data_frame = FetchVejmanPermissions(token, equipment_type, start_date, from_end_date, orchestrator_connection)
 
         if data_frame.empty:
             print(f'Ingen rækker for {equipment_type} fra startdato {start_date} og fra slutdato {from_end_date}')
@@ -441,6 +375,5 @@ for row in rows:
         ]
 
 
-        print(filtered_rows)
         # Fetch invoices for filtered rows
-        FetchInvoice(filtered_rows, token, pricebook_map, equipment_type, fakturalinjer, conn, faktura_db, developer_email)
+        FetchInvoice(filtered_rows, token, pricebook_map, equipment_type, fakturalinjer, conn, faktura_db, developer_email, orchestrator_connection)

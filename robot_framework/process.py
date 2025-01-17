@@ -91,36 +91,6 @@ def process(orchestrator_connection: OrchestratorConnection, queue_element: Queu
             # Fetch invoices for filtered rows
             FetchInvoice(filtered_rows, token, pricebook_map, equipment_type, fakturalinjer, conn, faktura_db, developer_email, orchestrator_connection)
 
-
-def generate_password(length=15):
-    digits = string.digits
-    lower_case = string.ascii_lowercase
-    upper_case = string.ascii_uppercase
-    special = "-!"
-
-    password = []
-    
-    # Pick 2 digits
-    password.extend(random.choices(digits, k=2))
-    
-    # Pick 4 lower case letters
-    password.extend(random.choices(lower_case, k=4))
-    
-    # Pick 1 special character
-    password.extend(random.choices(special, k=1))
-    
-    # Pick 2 upper case letters
-    password.extend(random.choices(upper_case, k=2))
-    
-    # Pick additional characters to make the length 15
-    all_chars = digits + lower_case + upper_case + special
-    password.extend(random.choices(all_chars, k=length - len(password)))
-    
-    # Shuffle the password to ensure randomness
-    random.shuffle(password)
-    
-    return ''.join(password)
-
 def FetchVejmanPermissions(token, equipment_type, fra_startdato, fra_slutdato, orchestrator_connection: OrchestratorConnection):
 
     combined_cases = []
@@ -204,10 +174,11 @@ def FetchInvoice(data_frame: pd.DataFrame, token, pricebook_map, equipment_type,
             end_date = datetime.strptime(row.get('end_date', ''), "%d-%m-%Y")
             completion_date = datetime.strptime(row.get('completion_date', ''), "%d-%m-%Y")
             auto_completed = row.get('auto_completed')
-            cvr_number = row.get('cvr_number')
+            #cvr_number = row.get('cvr_number')
             applicant = row.get('applicant')
             tilladelse_nr = case_number
             address = row['street_name']
+
             
             # Fetch detailed case data
             response = client.get(f"https://vejman.vd.dk/permissions/getcase?caseid={case_id}&token={token}", timeout=500)
@@ -218,23 +189,40 @@ def FetchInvoice(data_frame: pd.DataFrame, token, pricebook_map, equipment_type,
             # Check if there's an invoice in the JSON object
             invoice_data = json_object.get('invoice', {})
             
+            
+
+            
             if invoice_data:         
-                # Update the cvr_number if not found in the main DataFrame
-                if not cvr_number:
-                    contacts = json_object.get('contacts', [])
-                    for contact in contacts:
-                        cvr_number = contact.get('cvr_number')
-                        if cvr_number:
-                            break
+                # Get invoice role, select 1 (ansøger) if no role selected
+                invoice_role_id = invoice_data.get('role', {}).get('id', 1)
+                att = "Intet navn angivet"
+                # Get name for ATT and update the cvr_number if not found in the main DataFrame
+                contacts = json_object.get('contacts', [])
+                for contact in contacts:
+                    # Check if this contact has a role matching the invoice role id
+                    roles = contact.get("roles", [])
+                    if any(role.get("role", {}).get("id") == invoice_role_id for role in roles):
+                        # Combine name components
+                        name_parts = [
+                            contact.get("given_name", ""),
+                            contact.get("middle_name", ""),
+                            contact.get("surname", ""),
+                        ]
+                        combined_name = " ".join(part for part in name_parts if part)
+                        if combined_name:
+                            att = f"ATT: {combined_name}"  # Set att with the combined name
+
+                        cvr_number = contact.get("cvr_number")
+                        break  # Exit loop once the matching contact is processed
 
                 if not cvr_number:
                     orchestrator_connection.log_info("Intet CVR nummer")
-                    mail_body = append_to_mail_body(mail_body, f'Der er intet CVR nummer angivet på tilladelse <a href="https://vejman.vd.dk/permissions/update.jsp?caseid={case_id}">{tilladelse_nr}</a>.')
+                    mail_body = append_to_mail_body(mail_body, f'Der er intet CVR nummer angivet for faktura modtager på tilladelse <a href="https://vejman.vd.dk/permissions/update.jsp?caseid={case_id}">{tilladelse_nr}</a>.')
                     cvr_number = '00000000'
                 else:
                     if re.fullmatch(r'\d{8}', cvr_number) is None:
                         orchestrator_connection.log_info("Forkert angivet CVR nummer")
-                        mail_body = append_to_mail_body(mail_body, f'CVR nummer er angivet som {cvr_number} på tilladelse <a href="https://vejman.vd.dk/permissions/update.jsp?caseid={case_id}">{tilladelse_nr}</a>, men det burde være udelukkende 8 cifre. Check venligst om det er angivet korrekt og om der er skjulte tegn eller mellemrum.')
+                        mail_body = append_to_mail_body(mail_body, f'CVR nummer er angivet som {cvr_number} for faktura modtager på tilladelse <a href="https://vejman.vd.dk/permissions/update.jsp?caseid={case_id}">{tilladelse_nr}</a>, men det burde være udelukkende 8 cifre. Check venligst om det er angivet korrekt og om der er skjulte tegn eller mellemrum.')
                         cvr_number = '00000000'
                 invoice_details = invoice_data.get('details', [])
                 # Iterate through each invoice detail and extract relevant information
@@ -282,7 +270,7 @@ def FetchInvoice(data_frame: pd.DataFrame, token, pricebook_map, equipment_type,
                         orchestrator_connection.log_info("No matching row")
                         # Check if autocompleted, if so then end_date, if not check if completion_date is lesser than end_date, else use end_date
                         chosen_end_date = end_date if auto_completed == "AF" else min(completion_date, end_date) if completion_date and end_date else end_date
-
+                    
                     
                     if start_date and chosen_end_date:
                         # Convert both to date objects, ignoring time part
@@ -346,13 +334,14 @@ def FetchInvoice(data_frame: pd.DataFrame, token, pricebook_map, equipment_type,
                             Enhedspris = ?, 
                             Meter = ?, 
                             Startdato = ?, 
-                            Slutdato = ?
+                            Slutdato = ?,
+                            ATT = ?
                     WHEN NOT MATCHED THEN
                         INSERT (
                             VejmanID, Ansøger, FørsteSted, Tilladelsesnr, CvrNr, TilladelsesType, 
-                            Enhedspris, Meter, Startdato, Slutdato, VejmanFakturaID
+                            Enhedspris, Meter, Startdato, Slutdato, VejmanFakturaID, ATT
                         )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                     """
 
                     # Execute the query
@@ -365,11 +354,11 @@ def FetchInvoice(data_frame: pd.DataFrame, token, pricebook_map, equipment_type,
                                 
                                 # For update (if exists)
                                 applicant, address, tilladelse_nr, cvr_number, Fakturalinje, 
-                                unit_price, length, short_start_date, short_end_date,
+                                unit_price, length, short_start_date, short_end_date, att,
                                 
                                 # For insert (if not exists)
                                 case_id, applicant, address, tilladelse_nr, cvr_number, Fakturalinje, 
-                                unit_price, length, short_start_date, short_end_date, VejmanFakturaID
+                                unit_price, length, short_start_date, short_end_date, VejmanFakturaID, att
                             )
                         )
                         conn.commit()
