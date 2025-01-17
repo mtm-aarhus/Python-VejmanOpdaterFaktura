@@ -189,9 +189,6 @@ def FetchInvoice(data_frame: pd.DataFrame, token, pricebook_map, equipment_type,
             # Check if there's an invoice in the JSON object
             invoice_data = json_object.get('invoice', {})
             
-            
-
-            
             if invoice_data:         
                 # Get invoice role, select 1 (ansøger) if no role selected
                 invoice_role_id = invoice_data.get('role', {}).get('id', 1)
@@ -210,7 +207,7 @@ def FetchInvoice(data_frame: pd.DataFrame, token, pricebook_map, equipment_type,
                         ]
                         combined_name = " ".join(part for part in name_parts if part)
                         if combined_name:
-                            att = f"ATT: {combined_name}"  # Set att with the combined name
+                            att = f"Att: {combined_name}"  # Set att with the combined name
 
                         cvr_number = contact.get("cvr_number")
                         break  # Exit loop once the matching contact is processed
