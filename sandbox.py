@@ -374,3 +374,5 @@ for row in rows:
 
         # Fetch invoices for filtered rows
         FetchInvoice(filtered_rows, token, pricebook_map, equipment_type, fakturalinjer, conn, faktura_db, developer_email, orchestrator_connection)
+
+orchestrator_connection.update_constant("VejmanKassenSynkroniseret", datetime.now().strftime("%d-%m-%Y %H:%M"))
