@@ -240,6 +240,7 @@ def FetchInvoice(data_frame: pd.DataFrame, token, pricebook_map, equipment_type,
                     if matching_row and (matching_row.Faktureret == 1 or matching_row.SendTilFakturering == 1 or matching_row.FakturerIkke == 1):
                         orchestrator_connection.log_info("Row already sent to invoice, deleted or has been invoiced, skipping.")
                         continue           
+                    matched_fakturalinje = None
                     
                     for f in fakturalinjer.split(','):
                         if f.strip().lower() in detail_text.strip().lower():

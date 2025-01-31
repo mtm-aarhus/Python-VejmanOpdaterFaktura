@@ -170,6 +170,8 @@ def FetchInvoice(data_frame: pd.DataFrame, token, pricebook_map, equipment_type,
                         print("Row already sent to invoice, deleted or has been invoiced, skipping.")
                         continue           
                     
+                    matched_fakturalinje = None
+                    
                     for f in fakturalinjer.split(','):
                         if f.strip().lower() in detail_text.strip().lower():
                             print(f"Match found for Fakturalinje: {detail_text} with MaterielIDVejman = {equipment_type}: {f}")
