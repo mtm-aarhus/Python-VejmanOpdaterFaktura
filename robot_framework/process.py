@@ -147,7 +147,7 @@ def append_to_mail_body(mail_body, append_text):
 def SendEmail(to_address: str | list[str], subject: str, body: str, bcc: str):
     msg = EmailMessage()
     msg['to'] = to_address
-    msg['from'] = "VejmanFakturaRobot <rpamtm001@aarhus.dk>"
+    msg['from'] = "VejmanFakturaRobot <noreply@aarhus.dk>"
     msg['subject'] = subject
     msg['bcc'] = bcc
 
