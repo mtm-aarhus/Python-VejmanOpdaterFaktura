@@ -19,7 +19,8 @@ dependencies = [
     "OpenOrchestrator == 1.*",
     "Pillow == 10.*",
     "requests == 2.32.3",
-    "pandas == 2.2.2"
+    "pandas == 2.2.2",
+    "pip_system_certs"
 ]
 
 [project.optional-dependencies]
