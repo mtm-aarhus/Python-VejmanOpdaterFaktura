@@ -168,7 +168,7 @@ def upsert_issue(conn,
     )
 
     cur.execute(merge_sql, params)
-    # Commit done by caller
+    conn.commit()
 
 
 def auto_resolve_missing_issues(conn, case_id: str, current_issue_keys: set[tuple[str, str]]):
