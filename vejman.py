@@ -103,7 +103,6 @@ def upsert_issue(conn,
 
     if row and row.Status in ("UserAccepted", "AutoResolved"):
         # User or auto-resolve has handled this. Robot must not touch it.
-        print(f'Already resolved or accepted {case_id} {invoice_id} {issue_type}')
         return
 
 
@@ -362,7 +361,6 @@ def ProcessCases(
 
                 # If row exists and is not 'Ny', skip completely
                 if matching_row and matching_row.FakturaStatus != "Ny":
-                    print(f"{case_number} - {detail_text} - Already exists and not Ny")
                     continue
 
                 detail_text_clean = detail_text.strip().lower()
