@@ -11,7 +11,7 @@ from OpenOrchestrator.database.queues import QueueStatus
 from robot_framework import initialize
 from robot_framework import reset
 from robot_framework.exceptions import handle_error, BusinessError, log_exception
-from robot_framework import process
+from robot_framework import oldprocess
 from robot_framework import config
 
 
@@ -41,7 +41,7 @@ def main():
                     break  # Break queue loop
 
                 try:
-                    process.process(orchestrator_connection, queue_element)
+                    oldprocess.process(orchestrator_connection, queue_element)
                     orchestrator_connection.set_queue_element_status(queue_element.id, QueueStatus.DONE)
 
                 except BusinessError as error:

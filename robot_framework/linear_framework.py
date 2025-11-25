@@ -10,7 +10,7 @@ from OpenOrchestrator.orchestrator_connection.connection import OrchestratorConn
 from robot_framework import initialize
 from robot_framework import reset
 from robot_framework.exceptions import BusinessError, handle_error, log_exception
-from robot_framework import process
+from robot_framework import oldprocess
 from robot_framework import config
 
 
@@ -26,7 +26,7 @@ def main():
     for _ in range(config.MAX_RETRY_COUNT):
         try:
             reset.reset(orchestrator_connection)
-            process.process(orchestrator_connection)
+            oldprocess.process(orchestrator_connection)
             break
 
         # If any business rules are broken the robot should stop entirely.
