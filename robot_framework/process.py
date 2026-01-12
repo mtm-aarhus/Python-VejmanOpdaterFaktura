@@ -7,8 +7,8 @@ import re
 import pyodbc
 import pandas as pd
 
-from vejman import ProcessCases, map_materiel_to_equipment_types, FetchVejmanPermissions, FetchPricebookData
-from datetime import datetime
+from vejman import ProcessCases, map_materiel_to_equipment_types, FetchVejmanPermissions, FetchPricebookData, upsert_current_year_prices, load_unit_prices
+from datetime import datetime, timedelta
 
 # pylint: disable-next=unused-argument
 def process(orchestrator_connection: OrchestratorConnection, queue_element: QueueElement | None = None) -> None:
@@ -42,6 +42,8 @@ def process(orchestrator_connection: OrchestratorConnection, queue_element: Queu
 
     # Build a config dict: materiel_id -> {fakturalinjer, date range}
     materiel_config: dict[int, dict] = {}
+
+    unit_price_lookup = load_unit_prices(conn)
     for r in materiel_rows:
         materiel_id = r.MaterielIDVejman
         fakturalinjer_list = [
@@ -56,6 +58,15 @@ def process(orchestrator_connection: OrchestratorConnection, queue_element: Queu
             "slut_date": r.EarliestSlutDate,
         }
 
+    allowed_price_texts: set[str] = set()
+    
+    for conf in materiel_config.values():
+        for fl in conf.get("fakturalinjer", []):
+            if fl and str(fl).strip():
+                allowed_price_texts.add(str(fl).strip())
+
+    current_year = datetime.now().year
+    upsert_current_year_prices(conn, pricebook_map, current_year, allowed_price_texts)
     # ------------------------------
     # 2) Load current faktura rows into a dict for quick lookup
     # ------------------------------
@@ -72,6 +83,8 @@ def process(orchestrator_connection: OrchestratorConnection, queue_element: Queu
     # ------------------------------
     cases_by_id: dict[str, pd.Series] = {}
     case_materiel_ids: dict[str, set[int]] = {}
+    to_end_date = (datetime.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+
 
     for materiel_id, conf in materiel_config.items():
         start_date = conf["start_date"]
@@ -86,6 +99,7 @@ def process(orchestrator_connection: OrchestratorConnection, queue_element: Queu
                 equipment_type,
                 start_date,
                 from_end_date,
+                to_end_date,
                 orchestrator_connection,
             )
 
@@ -127,7 +141,7 @@ def process(orchestrator_connection: OrchestratorConnection, queue_element: Queu
         case_materiel_ids=case_materiel_ids,
         materiel_config=materiel_config,
         token=token,
-        pricebook_map=pricebook_map,
+        unit_price_lookup=unit_price_lookup,
         conn=conn,
         faktura_db_by_vejman_id=faktura_db_by_vejman_id,
         orchestrator_connection=orchestrator_connection,

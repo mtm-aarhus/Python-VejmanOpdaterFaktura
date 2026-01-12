@@ -22,14 +22,15 @@ def map_materiel_to_equipment_types(materiel_id: int) -> list[int]:
     return [materiel_id]
 
 
-def FetchVejmanPermissions(token, equipment_type, fra_startdato, fra_slutdato,
+def FetchVejmanPermissions(token, equipment_type, fra_startdato, fra_slutdato, til_slutdato,
                            orchestrator_connection: OrchestratorConnection):
     combined_cases = []
+    
 
     with requests.Session() as client:
         url = (
             "https://vejman.vd.dk/permissions/getcases"
-            f"?pmCaseStates=8"
+            f"?pmCaseStates=3%2C8"
             "&pmCaseFields=state%2Ctype%2Ccase_number%2Cauthority_reference_number"
             "%2Cstart_date%2Cstreet_name%2Ccvr_number%2Capplicant%2Cend_date"
             "%2Ccompletion_date%2Cauto_completedcontractor%2Cinitials"
@@ -47,6 +48,7 @@ def FetchVejmanPermissions(token, equipment_type, fra_startdato, fra_slutdato,
             f"&startDateFrom={fra_startdato}"
             f"&startDateTo={datetime.today().strftime('%Y-%m-%d')}"
             f"&endDateFrom={fra_slutdato}"
+            f"&endDateTo={til_slutdato}"
             "&policeDistrictShow="
             f"&_={int(time.time() * 1000)}"
             f"&token={token}"
@@ -213,7 +215,7 @@ def ProcessCases(
     case_materiel_ids: dict[str, set[int]],
     materiel_config: dict[int, dict],
     token,
-    pricebook_map,
+    unit_price_lookup,
     conn, 
     faktura_db_by_vejman_id: dict,
     orchestrator_connection: OrchestratorConnection
@@ -238,7 +240,14 @@ def ProcessCases(
             # Base data from the list cases API
             start_date = datetime.strptime(case_row.get("start_date", ""), "%d-%m-%Y")
             end_date = datetime.strptime(case_row.get("end_date", ""), "%d-%m-%Y")
-            completion_date = datetime.strptime(case_row.get("completion_date", ""), "%d-%m-%Y")
+
+            # If permit is Godkendt but not færdigmeldt, completion_date may be missing -> fall back to end_date
+            completion_date = (
+                datetime.strptime(case_row.get("completion_date", ""), "%d-%m-%Y")
+                if case_row.get("completion_date")
+                else end_date
+            )
+
             auto_completed = case_row.get("auto_completed")
             applicant = case_row.get("applicant")
             address = case_row["street_name"]
@@ -440,22 +449,41 @@ def ProcessCases(
                     )
                     start_for_calc = start_date
 
-                if start_date and chosen_end_date:
-                    days_difference = (chosen_end_date.date() - start_date.date()).days
-                    days_period = days_difference + 1  # inclusive
-                else:
-                    days_period = None
+                days_difference = (chosen_end_date.date() - start_for_calc.date()).days
+                days_period = days_difference + 1  # inclusive
 
                 # ------------------------
                 # Unit price + length / price calc
                 # ------------------------
+                price_year = start_for_calc.year if start_for_calc else None
+
+                lookup_key = (int(price_year), detail_text.strip().lower()) if price_year is not None else None
+                unit_price = unit_price_lookup.get(lookup_key) if lookup_key else None
+
                 raw_detail_unit_price = detail.get("unit_price", 0)
                 if isinstance(raw_detail_unit_price, str):
                     raw_detail_unit_price = float(raw_detail_unit_price.replace(",", "."))
                 detail_unit_price = raw_detail_unit_price
 
-                pricebook_entry = pricebook_map.get(detail_text, {})
-                unit_price = float(pricebook_entry.get("unit_price", 0))
+                if unit_price is None:
+                    upsert_issue(
+                        conn=conn,
+                        case_id=case_id,
+                        invoice_id=invoice_id_str,
+                        issue_type="Manglende enhedspris",
+                        fakturalinje=matched_fakturalinje,
+                        description=(
+                            f"Der mangler en enhedspris i VejmanEnhedsPriser for år {price_year} "
+                            f"og fakturalinje-teksten '{detail_text.strip()}'."
+                        ),
+                        fix=(
+                            "Kontakt udvikler, fakturalinjen indsættes ikke i kassen"
+                        ),
+                        caseworker_email=caseworker_email,
+                        inserted_to_kassen="No",
+                    )
+                    current_issue_keys.add((invoice_id_str, "Manglende enhedspris"))
+                    continue
 
                 try:
                     match_len = re.search(
@@ -636,3 +664,93 @@ def is_valid_cvr_mod11(cvr: str) -> bool:
     weights = [2, 7, 6, 5, 4, 3, 2, 1]
     total = sum(int(cvr[i]) * weights[i] for i in range(8))
     return total % 11 == 0
+
+def upsert_current_year_prices(conn, pricebook_map: dict, price_year: int, allowed_texts: set[str]) -> None:
+    """Upsert current year's Vejman unit prices into dbo.VejmanEnhedsPriser.
+
+    Only rows whose 'text' exists in VejmanFakturaTekster.Fakturalinje are written.
+    """
+    allowed_norm = {t.strip().lower() for t in (allowed_texts or set()) if t and str(t).strip()}
+
+    merge_sql = """
+    MERGE dbo.VejmanEnhedsPriser AS target
+    USING (SELECT ? AS PriceYear, ? AS PricebookText) AS source
+      ON target.PriceYear = source.PriceYear
+     AND target.PricebookText = source.PricebookText
+    WHEN MATCHED THEN
+      UPDATE SET
+        PricebookId        = ?,
+        PricebookCode      = ?,
+        EquipmentType      = ?,
+        UnitType           = ?,
+        UnitPrice          = ?,
+        SourceModifiedDate = ?,
+        SyncedAt           = SYSUTCDATETIME()
+    WHEN NOT MATCHED THEN
+      INSERT (PriceYear, PricebookText, PricebookId, PricebookCode, EquipmentType, UnitType, UnitPrice, SourceModifiedDate)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+    """
+
+    cur = conn.cursor()
+
+    def to_int_or_none(v):
+        s = str(v).strip() if v is not None else ""
+        return int(s) if s.isdigit() else None
+
+    for text, row in (pricebook_map or {}).items():
+        if not text:
+            continue
+        pricebook_text = str(text).strip()
+        if pricebook_text.lower() not in allowed_norm:
+            continue
+
+        unit_price_raw = str(row.get("unit_price", "0") or "0").strip().replace(",", ".")
+        if unit_price_raw.startswith("."):
+            unit_price_raw = "0" + unit_price_raw
+        try:
+            unit_price = float(unit_price_raw)
+        except ValueError:
+            unit_price = 0.0
+
+        unit_type = str(row.get("unit_type", "") or "").strip() or None
+        pricebook_id = to_int_or_none(row.get("id"))
+        pricebook_code = row.get("code") or None
+        equipment_type = to_int_or_none(row.get("equipment_type"))
+        source_modified_date = row.get("modified_date") or None
+
+        params = (
+            price_year,
+            pricebook_text,
+            pricebook_id,
+            pricebook_code,
+            equipment_type,
+            unit_type,
+            unit_price,
+            source_modified_date,
+            # INSERT params repeated
+            price_year,
+            pricebook_text,
+            pricebook_id,
+            pricebook_code,
+            equipment_type,
+            unit_type,
+            unit_price,
+            source_modified_date,
+        )
+        cur.execute(merge_sql, params)
+
+    conn.commit()
+
+def load_unit_prices(conn) -> dict[tuple[int, str], float]:
+    """Load all unit prices into memory for fast lookups during invoice processing."""
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT PriceYear, PricebookText, UnitPrice
+        FROM dbo.VejmanEnhedsPriser
+    """)
+    d: dict[tuple[int, str], float] = {}
+    for y, txt, price in cur.fetchall():
+        if y is None or txt is None:
+            continue
+        d[(int(y), str(txt).strip().lower())] = float(price)
+    return d
