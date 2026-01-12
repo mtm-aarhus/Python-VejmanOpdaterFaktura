@@ -86,7 +86,8 @@ def upsert_issue(conn,
                  description: str,
                  fix: str,
                  caseworker_email: str | None,
-                 inserted_to_kassen: str):
+                 inserted_to_kassen: str,
+                 tilladelsesnr: str):
 
     inv_id_str = int(invoice_id) if invoice_id else None
 
@@ -128,6 +129,7 @@ def upsert_issue(conn,
             SuggestedFix     = ?,
             CaseworkerEmail  = ?,
             InsertedToKassen = ?,
+            TilladelsesNr    = ?, 
             Status           = 'Open',
             UpdatedAt        = GETDATE()
     WHEN NOT MATCHED THEN
@@ -140,11 +142,12 @@ def upsert_issue(conn,
             SuggestedFix,
             CaseworkerEmail,
             InsertedToKassen,
+            TilladelsesNr, 
             Status,
             CreatedAt,
             UpdatedAt
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Open', GETDATE(), GETDATE());
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Open', GETDATE(), GETDATE());
     """
 
     params = (
@@ -158,6 +161,7 @@ def upsert_issue(conn,
         fix,
         caseworker_email,
         inserted_to_kassen,
+        tilladelsesnr,
         # INSERT
         case_id,
         inv_id_str,
@@ -167,6 +171,7 @@ def upsert_issue(conn,
         fix,
         caseworker_email,
         inserted_to_kassen,
+        tilladelsesnr,
     )
 
     cur.execute(merge_sql, params)
@@ -325,6 +330,7 @@ def ProcessCases(
                     ),
                     caseworker_email=caseworker_email,
                     inserted_to_kassen="No",  # not tied to a specific fakturalinje
+                    tilladelsesnr=case_number,
                 )
                 current_issue_keys.add((case_number, "CVR mangler eller ugyldigt."))
                 cvr_number = "00000000"
@@ -346,6 +352,7 @@ def ProcessCases(
                         ),
                         caseworker_email=caseworker_email,
                         inserted_to_kassen="No",
+                        tilladelsesnr=case_number,
                     )
                     current_issue_keys.add((case_number, "CVR modulus 11 fejlede"))
 
@@ -407,6 +414,7 @@ def ProcessCases(
                         ),
                         caseworker_email=caseworker_email,
                         inserted_to_kassen="No",
+                        tilladelsesnr=case_number,
                     )
                     current_issue_keys.add((invoice_id_str, "Fakturalinje uden match"))
                     # Skip DB insertion completely for this line
@@ -430,6 +438,7 @@ def ProcessCases(
                         ),
                         caseworker_email=caseworker_email,
                         inserted_to_kassen="Yes",  # line still goes to Vejmankassen
+                        tilladelsesnr=case_number,
                     )
                     current_issue_keys.add((invoice_id_str, "Manglende/forkert materiel"))
 
@@ -481,6 +490,7 @@ def ProcessCases(
                         ),
                         caseworker_email=caseworker_email,
                         inserted_to_kassen="No",
+                        tilladelsesnr=case_number,
                     )
                     current_issue_keys.add((invoice_id_str, "Manglende enhedspris"))
                     continue
@@ -536,6 +546,7 @@ def ProcessCases(
                             ),
                             caseworker_email=caseworker_email,
                             inserted_to_kassen="Yes",  # line will be inserted i Vejmankassen
+                            tilladelsesnr=case_number,
                         )
                         current_issue_keys.add((invoice_id_str, "Længde/m2 stemmer ikke"))
 
@@ -568,6 +579,7 @@ def ProcessCases(
                             ),
                             caseworker_email=caseworker_email,
                             inserted_to_kassen="Yes",
+                            tilladelsesnr=case_number,
                         )
                         current_issue_keys.add((invoice_id_str, "Antal dage stemmer ikke"))
 
