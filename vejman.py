@@ -7,22 +7,7 @@ from datetime import datetime
 import pandas as pd
 import re
 
-
-def map_materiel_to_equipment_types(materiel_id: int) -> list[int]:
-    """
-    Reuse your mapping logic:
-    - MaterielID 1 -> equipmentTypes [1, 9]
-    - MaterielID 2 -> equipmentTypes [2, 7]
-    - Other -> [materiel_id]
-    """
-    if materiel_id == 1:
-        return [1, 9]
-    if materiel_id == 2:
-        return [2, 7]
-    return [materiel_id]
-
-
-def FetchVejmanPermissions(token, equipment_type, fra_startdato, fra_slutdato, til_slutdato,
+def FetchVejmanPermissions(token, til_slutdato,
                            orchestrator_connection: OrchestratorConnection):
     combined_cases = []
     
@@ -44,10 +29,9 @@ def FetchVejmanPermissions(token, equipment_type, fra_startdato, fra_slutdato, t
             "&dontincludemap=1"
             "&authority=751"
             "&cse="
-            f"&equipmentType={equipment_type}"
-            f"&startDateFrom={fra_startdato}"
+            f"&startDateFrom=2024-01-01"
             f"&startDateTo={datetime.today().strftime('%Y-%m-%d')}"
-            f"&endDateFrom={fra_slutdato}"
+            f"&endDateFrom=2024-01-01"
             f"&endDateTo={til_slutdato}"
             "&policeDistrictShow="
             f"&_={int(time.time() * 1000)}"
@@ -237,8 +221,23 @@ def ProcessCases(
             fakturalinje_to_materiel[f_clean] = mid
 
     with requests.Session() as client:
-        for case_id, case_row in cases_by_id.items():
+        total_cases = len(cases_by_id)
+        start_time = time.perf_counter()
+
+        for idx, (case_id, case_row) in enumerate(cases_by_id.items(), start=1):
             case_number = case_row["case_number"]
+            
+            elapsed = time.perf_counter() - start_time
+            avg_per_case = elapsed / idx
+            remaining = avg_per_case * (total_cases - idx)
+            print(
+                f"[{idx}/{total_cases}] "
+                f"{idx/total_cases:.1%} | "
+                f"elapsed: {elapsed:6.1f}s | "
+                f"ETA: {remaining:6.1f}s | "
+                f"case: {case_number}"
+            )
+
 
             current_issue_keys: set[tuple[str, str]] = set()
 
@@ -356,13 +355,6 @@ def ProcessCases(
                     )
                     current_issue_keys.add((case_number, "CVR modulus 11 fejlede"))
 
-            # Pre-calc allowed fakturalinjer + materiel IDs for this case
-            materiel_ids_for_case = sorted(case_materiel_ids.get(case_id, set()))
-            allowed_fakturalinjer: list[str] = []
-            for mid in materiel_ids_for_case:
-                conf = materiel_config.get(mid)
-                if conf:
-                    allowed_fakturalinjer.extend(conf["fakturalinjer"])
 
             # ------------------------
             # Process each invoice line
@@ -382,16 +374,13 @@ def ProcessCases(
                 detail_text_clean = detail_text.strip().lower()
 
                 matched_fakturalinje = None
-                matched_materiel_id = None
 
                 for fl, mid in fakturalinje_to_materiel.items():
                     if fl in detail_text_clean:
                         matched_fakturalinje = fl
-                        matched_materiel_id = mid
                         break
 
                 text_is_known = matched_fakturalinje is not None
-                materiel_is_allowed = matched_materiel_id in materiel_ids_for_case
 
                 # ------------------------
                 # Fakturalinje not known at all
@@ -420,27 +409,6 @@ def ProcessCases(
                     # Skip DB insertion completely for this line
                     continue
 
-                # ------------------------
-                # Fakturalinje known, but materiel not attached on the case
-                # ------------------------
-                if text_is_known and not materiel_is_allowed:
-                    upsert_issue(
-                        conn=conn,
-                        case_id=case_id,
-                        invoice_id=invoice_id_str,
-                        issue_type="Manglende/forkert materiel",
-                        fakturalinje=matched_fakturalinje,
-                        description=(
-                            f"Fakturalinjen matcher materiel nummer {matched_materiel_id}, men "
-                            "denne materieltype er ikke tilknyttet tilladelsen i Vejman."                        ),
-                        fix=(
-                            f"Tilknyt materiel nummer {matched_materiel_id} i Vejman."
-                        ),
-                        caseworker_email=caseworker_email,
-                        inserted_to_kassen="Yes",  # line still goes to Vejmankassen
-                        tilladelsesnr=case_number,
-                    )
-                    current_issue_keys.add((invoice_id_str, "Manglende/forkert materiel"))
 
                 # ------------------------
                 # Determine dates / chosen_end_date

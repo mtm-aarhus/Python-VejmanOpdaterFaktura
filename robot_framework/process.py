@@ -7,7 +7,7 @@ import re
 import pyodbc
 import pandas as pd
 
-from vejman import ProcessCases, map_materiel_to_equipment_types, FetchVejmanPermissions, FetchPricebookData, upsert_current_year_prices, load_unit_prices
+from vejman import ProcessCases, FetchVejmanPermissions, FetchPricebookData, upsert_current_year_prices, load_unit_prices
 from datetime import datetime, timedelta
 
 # pylint: disable-next=unused-argument
@@ -86,52 +86,34 @@ def process(orchestrator_connection: OrchestratorConnection, queue_element: Queu
     to_end_date = (datetime.today() - timedelta(days=1)).strftime("%Y-%m-%d")
 
 
-    for materiel_id, conf in materiel_config.items():
-        start_date = conf["start_date"]
-        from_end_date = conf["slut_date"]
+    df = FetchVejmanPermissions(
+        token,
+        to_end_date,
+        orchestrator_connection
+    )
 
-        # Map materiel -> equipmentType(s) as before
-        equipment_types = map_materiel_to_equipment_types(materiel_id)
+    # Clean authority_reference_number column
+    df["cleaned_authority_reference_number"] = df["authority_reference_number"].apply(
+        lambda x: re.sub(r"[^\x20-\x7E]", "", str(x).strip().lower()) if pd.notnull(x) else ""
+    )
 
-        for equipment_type in equipment_types:
-            df = FetchVejmanPermissions(
-                token,
-                equipment_type,
-                start_date,
-                from_end_date,
-                to_end_date,
-                orchestrator_connection,
-            )
+    # Filter rows based on substring checks for 'faktura sendt', 'faktureres ikke', 'annulleret', and 'fak'
+    filtered_rows = df[
+        ~(
+            df["cleaned_authority_reference_number"].str.contains("faktura sendt")
+            | df["cleaned_authority_reference_number"].str.contains("faktureres ikke")
+            | df["cleaned_authority_reference_number"].str.contains("annulleret")
+            | (df["cleaned_authority_reference_number"] == "fak")
+        )
+        & (df["initials"] != "JADT")
+    ]
 
-            if df.empty:
-                orchestrator_connection.log_info(
-                    f'Ingen rækker for equipmentType {equipment_type} (MaterielID {materiel_id}) '
-                    f'fra startdato {start_date} og fra slutdato {from_end_date}'
-                )
-                continue
-
-            # Clean authority_reference_number column
-            df["cleaned_authority_reference_number"] = df["authority_reference_number"].apply(
-                lambda x: re.sub(r"[^\x20-\x7E]", "", str(x).strip().lower()) if pd.notnull(x) else ""
-            )
-
-            # Filter rows based on substring checks for 'faktura sendt', 'faktureres ikke', 'annulleret', and 'fak'
-            filtered_rows = df[
-                ~(
-                    df["cleaned_authority_reference_number"].str.contains("faktura sendt")
-                    | df["cleaned_authority_reference_number"].str.contains("faktureres ikke")
-                    | df["cleaned_authority_reference_number"].str.contains("annulleret")
-                    | (df["cleaned_authority_reference_number"] == "fak")
-                )
-                & (df["initials"] != "JADT")
-            ]
-
-            for _, case_row in filtered_rows.iterrows():
-                case_id = case_row["case_id"]
-                # Save one representative row per case_id
-                cases_by_id[case_id] = case_row
-                # Track which materiel_ids this case belongs to
-                case_materiel_ids.setdefault(case_id, set()).add(materiel_id)
+    for _, case_row in filtered_rows.iterrows():
+        case_id = case_row["case_id"]
+        # Save one representative row per case_id
+        cases_by_id[case_id] = case_row
+        # Track which materiel_ids this case belongs to
+        case_materiel_ids.setdefault(case_id, set()).add(materiel_id)
 
     # ------------------------------
     # 4) Process each unique case, its invoices and DB updates
